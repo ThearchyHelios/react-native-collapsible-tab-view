@@ -269,6 +269,7 @@ export const useScrollHandlerY = (name: TabName) => {
     contentHeights,
     indexDecimal,
     allowHeaderOverscroll,
+    isSlidingTopContainerValue,
   } = useTabsContext()
 
   const enabled = useSharedValue(false)
@@ -372,17 +373,21 @@ export const useScrollHandlerY = (name: TabName) => {
             const clampMax =
               contentHeight - (containerHeight || 0) + contentInset
             // make sure the y value is clamped to the scrollable size (clamps overscrolling)
-            scrollYCurrent.value = allowHeaderOverscroll
-              ? y
-              : interpolate(
+            if (!isSlidingTopContainerValue.value) {
+              scrollYCurrent.value = allowHeaderOverscroll
+                ? y
+                : interpolate(
                   y,
-                  [0, clampMax],
-                  [0, clampMax],
+                  [ 0, clampMax ],
+                  [ 0, clampMax ],
                   Extrapolation.CLAMP
                 )
+            }
           } else {
             const { y } = event.contentOffset
-            scrollYCurrent.value = y
+            if (!isSlidingTopContainerValue.value) {
+              scrollYCurrent.value = y
+            }
           }
 
           scrollY.value[name] = scrollYCurrent.value

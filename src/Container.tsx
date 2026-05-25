@@ -7,8 +7,6 @@ import Animated, {
   Extrapolation,
   interpolate,
   ReduceMotion,
-  runOnJS,
-  runOnUI,
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
@@ -18,6 +16,9 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated'
+// reanimated 4 / worklets 0.8: runOnJS(fn)(args) 的柯里化形式会静默 no-op，
+// 必须改用 worklets 的 scheduleOnRN(fn, args) / runOnUISync(fn, args)。
+import { runOnUISync, scheduleOnRN } from 'react-native-worklets'
 
 import { Context, TabNameContext } from './Context'
 import { IS_IOS, ONE_FRAME_MS, scrollToImpl } from './helpers'
@@ -101,11 +102,11 @@ export const Container = React.memo(
       )
 
       const contentInset = React.useMemo(() => {
-        if (allowHeaderOverscroll) return 0
-
-        // necessary for the refresh control on iOS to be positioned underneath the header
-        // this also adjusts the scroll bars to clamp underneath the header area
-        return IS_IOS ? (headerHeight || 0) + (tabBarHeight || 0) : 0
+        // Patched (RN 0.85/Fabric): iOS 原本靠 ScrollView 的 contentInset 预留 header
+        // 空间,但 Fabric 不生效 → 内容焊死在屏幕顶端、滚动时与 header 脱节。改为 0,
+        // header 空间统一靠 contentContainerStyle.paddingTop 预留(见 useCollapsibleStyle)，
+        // 与 Android 一致。scroll handler 里的 `y + contentInset` 也因此归一化正确。
+        return 0
       }, [headerHeight, tabBarHeight, allowHeaderOverscroll])
 
       const snappingTo: ContextType['snappingTo'] = useSharedValue(0)
@@ -143,9 +144,8 @@ export const Container = React.memo(
           return headerHeight !== undefined ? headerHeight - minHeaderHeight : 0
         }, [headerHeight, minHeaderHeight])
 
-      const indexDecimal: ContextType['indexDecimal'] = useSharedValue(
-        index.value
-      )
+      const indexDecimal: ContextType['indexDecimal'] =
+        useSharedValue(initialIndex)
 
       const afterRender = useSharedValue(0)
       React.useEffect(() => {
@@ -232,7 +232,7 @@ export const Container = React.memo(
           syncCurrentTabScrollPosition()
         }
         if (timeSinceFirstFrame > 1500) {
-          runOnJS(toggleSyncScrollFrame)(false)
+          scheduleOnRN(toggleSyncScrollFrame, false)
         }
       }, false)
 
@@ -246,7 +246,7 @@ export const Container = React.memo(
               scrollY.value[tabNames.value[index.value]] -
               scrollY.value[tabNames.value[i]] +
               offset.value
-            runOnJS(propagateTabChange)({
+            scheduleOnRN(propagateTabChange, {
               prevIndex: index.value,
               index: i,
               prevTabName: tabNames.value[index.value],
@@ -259,7 +259,7 @@ export const Container = React.memo(
                 scrollYCurrent.value =
                   scrollY.value[tabNames.value[index.value]] || 0
             }
-            runOnJS(toggleSyncScrollFrame)(true)
+            scheduleOnRN(toggleSyncScrollFrame, true)
           }
         },
         []
@@ -288,6 +288,10 @@ export const Container = React.memo(
               translateY: headerTranslateY.value,
             },
           ],
+          // zIndex 放进 animated style，跟 transform 同帧提交，避免
+          // IOS_SYNCHRONOUSLY_UPDATE_UI_PROPS 下 transform 走同步路、zIndex 留在 shadow
+          // tree 不同步 → header 在滚动时掉到内容后面。
+          zIndex: 100,
         }
       }, [revealHeaderOnScroll])
 
@@ -297,7 +301,8 @@ export const Container = React.memo(
 
           if (name === focusedTab.value) {
             const ref = refMap[name]
-            runOnUI(scrollToImpl)(
+            runOnUISync(
+              scrollToImpl,
               ref,
               0,
               headerScrollDistance.value - contentInset,
@@ -315,7 +320,7 @@ export const Container = React.memo(
         () => tabNamesArray.length,
         (tabLength) => {
           if (index.value >= tabLength) {
-            runOnJS(onTabPress)(tabNamesArray[tabLength - 1])
+            scheduleOnRN(onTabPress, tabNamesArray[tabLength - 1])
           }
         }
       )
@@ -439,50 +444,56 @@ export const Container = React.memo(
             onLayout={getContainerLayoutHeight}
             pointerEvents="box-none"
           >
-            <GestureDetector gesture={pan}>
-              <Animated.View
-                pointerEvents="box-none"
-                style={[
-                  styles.topContainer,
-                  headerContainerStyle,
-                  !cancelTranslation && stylez,
-                ]}
-              >
-                <View
-                  style={[styles.container, styles.headerContainer]}
-                  onLayout={getHeaderHeight}
-                  pointerEvents="box-none"
-                >
-                  {renderHeader &&
-                    renderHeader({
-                      containerRef,
-                      index,
-                      tabNames: tabNamesArray,
-                      focusedTab,
-                      indexDecimal,
-                      onTabPress,
-                      tabProps,
-                    })}
+            <Animated.View
+              pointerEvents="box-none"
+              style={[
+                styles.topContainer,
+                headerContainerStyle,
+                !cancelTranslation && stylez,
+              ]}
+            >
+              {/* Patched (r4 / RN 0.85): GestureDetector 不再直接包裹带
+                  useAnimatedStyle transform 的 Animated.View —— gesture-handler 2.31 +
+                  Fabric 下那样会导致 header 的 transform 不提交(滚动时 header 不动)。
+                  transform 留在外层 Animated.View，GestureDetector 只包内层无动画手势容器。 */}
+              <GestureDetector gesture={pan}>
+                <View pointerEvents="box-none" style={{ width: '100%' }}>
+                  <View
+                    style={[styles.container, styles.headerContainer]}
+                    onLayout={getHeaderHeight}
+                    pointerEvents="box-none"
+                  >
+                    {renderHeader &&
+                      renderHeader({
+                        containerRef,
+                        index,
+                        tabNames: tabNamesArray,
+                        focusedTab,
+                        indexDecimal,
+                        onTabPress,
+                        tabProps,
+                      })}
+                  </View>
+                  <View
+                    style={[styles.container, styles.tabBarContainer]}
+                    onLayout={getTabBarHeight}
+                    pointerEvents="box-none"
+                  >
+                    {renderTabBar &&
+                      renderTabBar({
+                        containerRef,
+                        index,
+                        tabNames: tabNamesArray,
+                        focusedTab,
+                        indexDecimal,
+                        width,
+                        onTabPress,
+                        tabProps,
+                      })}
+                  </View>
                 </View>
-                <View
-                  style={[styles.container, styles.tabBarContainer]}
-                  onLayout={getTabBarHeight}
-                  pointerEvents="box-none"
-                >
-                  {renderTabBar &&
-                    renderTabBar({
-                      containerRef,
-                      index,
-                      tabNames: tabNamesArray,
-                      focusedTab,
-                      indexDecimal,
-                      width,
-                      onTabPress,
-                      tabProps,
-                    })}
-                </View>
-              </Animated.View>
-            </GestureDetector>
+              </GestureDetector>
+            </Animated.View>
 
             <AnimatedPagerView
               ref={containerRef}

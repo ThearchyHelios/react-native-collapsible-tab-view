@@ -20,13 +20,13 @@ import Animated, {
   withDelay,
   withTiming,
   interpolate,
-  runOnJS,
-  runOnUI,
   useEvent,
   useHandler,
   AnimatedRef,
   Extrapolation,
 } from 'react-native-reanimated'
+// reanimated 4 / worklets 0.8: runOnJS/runOnUI 柯里化调用静默 no-op → 用 worklets 新 API
+import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets'
 import { useDeepCompareMemo } from 'use-deep-compare'
 
 import { Context, TabNameContext } from './Context'
@@ -155,14 +155,11 @@ export function useCollapsibleStyle(): CollapsibleStyle {
     () => ({
       style: { width },
       contentContainerStyle: {
-        minHeight:
-          IS_IOS && !allowHeaderOverscroll
-            ? containerHeightWithMinHeader - (tabBarHeight || 0)
-            : containerHeightWithMinHeader + (headerHeight || 0),
-        paddingTop:
-          IS_IOS && !allowHeaderOverscroll
-            ? 0
-            : (headerHeight || 0) + (tabBarHeight || 0),
+        // Patched (RN 0.85/Fabric): iOS 改用与 Android 相同的 paddingTop 预留 header
+        // 空间。原本 iOS 靠 ScrollView 的 contentInset，Fabric 下不生效导致内容焊死顶部、
+        // 与 header 脱节。配合 contentInset=0(见 Container)。
+        minHeight: containerHeightWithMinHeader + (headerHeight || 0),
+        paddingTop: (headerHeight || 0) + (tabBarHeight || 0),
       },
       progressViewOffset:
         // on iOS we need the refresh control to be at the top if overscrolling
@@ -195,7 +192,7 @@ export function useUpdateScrollViewContentSize({ name }: { name: TabName }) {
 
   const scrollContentSizeChange = useCallback(
     (_: number, h: number) => {
-      runOnUI(setContentHeights)(name, h)
+      scheduleOnUI(setContentHeights, name, h)
     },
     [setContentHeights, name]
   )
@@ -592,7 +589,7 @@ export function useConvertAnimatedToValue<T>(
     },
     (animValue) => {
       if (animValue !== value) {
-        runOnJS(setValue)(animValue)
+        scheduleOnRN(setValue, animValue)
       }
     },
     [value]

@@ -22,7 +22,6 @@ const ScrollViewMemo = React.memo(
     (props, passRef) => {
       return (
         <Animated.ScrollView
-          // @ts-expect-error reanimated types are broken on ref
           ref={passRef}
           {...props}
         />

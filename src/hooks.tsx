@@ -533,10 +533,13 @@ export function useSharedAnimatedRef<T extends RefComponent>(
     if (!outerRef) {
       return
     }
+    // reanimated 4 types AnimatedRef.current via ExtractElementRef, which is
+    // no longer assignable to T — bridge semantics are unchanged, so assert.
+    const current = ref.current as unknown as T | null
     if (typeof outerRef === 'function') {
-      outerRef(ref.current)
+      outerRef(current)
     } else {
-      outerRef.current = ref.current
+      outerRef.current = current
     }
   })
 

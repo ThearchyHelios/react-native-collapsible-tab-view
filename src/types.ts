@@ -41,7 +41,7 @@ export type TabBarProps<T extends TabName = TabName> = {
   focusedTab: SharedValue<T>
   tabNames: T[]
   index: SharedValue<number>
-  containerRef: React.RefObject<ContainerRef>
+  containerRef: AnimatedRef<ContainerRef>
   onTabPress: (name: T) => void
   tabProps: TabsWithProps<T>
 

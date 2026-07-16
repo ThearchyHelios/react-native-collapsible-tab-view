@@ -124,14 +124,13 @@ function FlashListImpl<R>(
     [contentInset]
   )
 
+  // 上游 PR #497:之前只透传 paddingTop，丢掉了库算出的 minHeight
+  // (containerHeight-minHeaderHeight+headerHeight)，短列表内容不足一屏时
+  // 无法滚动 → 切 tab 后 header 同步失效。完整透传库样式(与 FlatList 一致)，
+  // 用户样式在后可覆盖。
   const memoContentContainerStyle = React.useMemo(
-    () => [
-      {
-        paddingTop: contentContainerStyle.paddingTop,
-      },
-      _contentContainerStyle,
-    ],
-    [_contentContainerStyle, contentContainerStyle.paddingTop]
+    () => [contentContainerStyle, _contentContainerStyle],
+    [_contentContainerStyle, contentContainerStyle]
   )
 
   return (

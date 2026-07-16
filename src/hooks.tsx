@@ -9,9 +9,8 @@ import {
   useRef,
 } from 'react'
 import { LayoutChangeEvent, StyleSheet, ViewProps } from 'react-native'
-import { ContainerRef, RefComponent } from 'react-native-collapsible-tab-view'
 import { PagerViewOnPageScrollEvent } from 'react-native-pager-view'
-import Animated, {
+import {
   cancelAnimation,
   useAnimatedReaction,
   useAnimatedRef,
@@ -24,6 +23,7 @@ import Animated, {
   useHandler,
   AnimatedRef,
   Extrapolation,
+  SharedValue,
 } from 'react-native-reanimated'
 // reanimated 4 / worklets 0.8: runOnJS/runOnUI 柯里化调用静默 no-op → 用 worklets 新 API
 import { scheduleOnRN, scheduleOnUI } from 'react-native-worklets'
@@ -33,7 +33,9 @@ import { Context, TabNameContext } from './Context'
 import { IS_IOS, ONE_FRAME_MS, scrollToImpl } from './helpers'
 import {
   CollapsibleStyle,
+  ContainerRef,
   ContextType,
+  RefComponent,
   TabName,
   TabReactElement,
   TabsWithProps,
@@ -278,7 +280,7 @@ export const useScrollHandlerY = (name: TabName) => {
       'worklet'
       enabled.value = toggle
     },
-    [name, refMap, scrollTo]
+    [enabled]
   )
 
   /**
@@ -288,17 +290,6 @@ export const useScrollHandlerY = (name: TabName) => {
    * call it to sync the scenes.
    */
   const afterDrag = useSharedValue(0)
-
-  const scrollAnimation = useSharedValue<number | undefined>(undefined)
-
-  useAnimatedReaction(
-    () => scrollAnimation.value,
-    (val) => {
-      if (val !== undefined) {
-        scrollTo(refMap[name], 0, val, false, '[useAnimatedReaction scroll]')
-      }
-    }
-  )
 
   const onMomentumEnd = () => {
     'worklet'
@@ -322,9 +313,13 @@ export const useScrollHandlerY = (name: TabName) => {
               accDiffClamp.value = withTiming(headerScrollDistance.value)
 
               if (scrollYCurrent.value < headerScrollDistance.value) {
-                scrollAnimation.value = scrollYCurrent.value
-                scrollAnimation.value = withTiming(headerScrollDistance.value)
-                //console.log('[${name}] sticky snap up')
+                scrollTo(
+                  refMap[name],
+                  0,
+                  headerScrollDistance.value,
+                  true,
+                  `[${name}] sticky snap up`
+                )
               }
             }
           } else {
@@ -338,14 +333,18 @@ export const useScrollHandlerY = (name: TabName) => {
         ) {
           // snap down
           snappingTo.value = 0
-          scrollAnimation.value = scrollYCurrent.value
-          scrollAnimation.value = withTiming(0)
+          scrollTo(refMap[name], 0, 0, true, `[${name}] snap down`)
           //console.log('[${name}] snap down')
         } else if (scrollYCurrent.value <= headerScrollDistance.value) {
           // snap up
           snappingTo.value = headerScrollDistance.value
-          scrollAnimation.value = scrollYCurrent.value
-          scrollAnimation.value = withTiming(headerScrollDistance.value)
+          scrollTo(
+            refMap[name],
+            0,
+            headerScrollDistance.value,
+            true,
+            `[${name}] snap up`
+          )
           //console.log('[${name}] snap up')
         }
       }
@@ -578,9 +577,7 @@ export function useAfterMountEffect(
   return onLayoutOut
 }
 
-export function useConvertAnimatedToValue<T>(
-  animatedValue: Animated.SharedValue<T>
-) {
+export function useConvertAnimatedToValue<T>(animatedValue: SharedValue<T>) {
   const [value, setValue] = useState<T>(animatedValue.value)
 
   useAnimatedReaction(
@@ -602,7 +599,7 @@ export interface HeaderMeasurements {
   /**
    * Animated value that represents the current Y translation of the header
    */
-  top: Animated.SharedValue<number>
+  top: SharedValue<number>
   /**
    * Animated value that represents the height of the header
    */
@@ -620,7 +617,7 @@ export function useHeaderMeasurements(): HeaderMeasurements {
 /**
  * Returns the vertical scroll position of the current tab as an Animated SharedValue
  */
-export function useCurrentTabScrollY(): Animated.SharedValue<number> {
+export function useCurrentTabScrollY(): SharedValue<number> {
   const { scrollYCurrent } = useTabsContext()
   return scrollYCurrent
 }

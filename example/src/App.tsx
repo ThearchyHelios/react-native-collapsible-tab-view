@@ -23,7 +23,6 @@ import FlashList from './FlashList'
 import HeaderOverscrollExample from './HeaderOverscroll'
 import Lazy from './Lazy'
 import LazyNoFade from './LazyNoFade'
-import MasonryFlashList from './MasonryFlashList'
 import MinHeaderHeight from './MinHeaderHeight'
 import OnTabChange from './OnTabChange'
 import QuickStartDemo from './QuickStartDemo'
@@ -47,7 +46,6 @@ const EXAMPLE_COMPONENTS: ExampleComponentType[] = [
   RevealHeaderOnScrollSnap,
   Lazy,
   LazyNoFade,
-  MasonryFlashList,
   ScrollableTabs,
   CenteredEmptyList,
   ScrollOnHeader,

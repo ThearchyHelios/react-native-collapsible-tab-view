@@ -6,7 +6,6 @@ import Animated, {
   cancelAnimation,
   Extrapolation,
   interpolate,
-  ReduceMotion,
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
@@ -29,6 +28,9 @@ import { Tab } from './Tab'
 import { CollapsibleProps, CollapsibleRef, ContextType, IndexChangeEventData, TabName } from './types'
 
 const AnimatedPagerView = Animated.createAnimatedComponent(PagerView)
+
+/** 切 tab 后逐帧回写滚动位置的最小同步间隔(见 syncScrollFrame) */
+const SCROLL_SYNC_INTERVAL_MS = 100
 
 /**
  * Basic usage looks like this:
@@ -227,9 +229,21 @@ export const Container = React.memo(
        * */
       const toggleSyncScrollFrame = (toggle: boolean) =>
         syncScrollFrame.setActive(toggle)
+      const lastScrollSyncTime = useSharedValue(-SCROLL_SYNC_INTERVAL_MS)
       const syncScrollFrame = useFrameCallback(({ timeSinceFirstFrame }) => {
-        if (timeSinceFirstFrame % 100 === 0) {
+        // timeSinceFirstFrame 是浮点毫秒(120Hz 下为 8.33 的倍数)，`% 100 === 0`
+        // 几乎永不命中 → 改为记录上次同步时间戳，距上次 ≥100ms 才同步一次。
+        // setActive(true) 会让 timeSinceFirstFrame 从 0 重新计时，检测到回卷就
+        // 重置基准，保证每次激活的第一帧立即同步。
+        if (timeSinceFirstFrame < lastScrollSyncTime.value) {
+          lastScrollSyncTime.value = timeSinceFirstFrame - SCROLL_SYNC_INTERVAL_MS
+        }
+        if (
+          timeSinceFirstFrame - lastScrollSyncTime.value >=
+          SCROLL_SYNC_INTERVAL_MS
+        ) {
           syncCurrentTabScrollPosition()
+          lastScrollSyncTime.value = timeSinceFirstFrame
         }
         if (timeSinceFirstFrame > 1500) {
           scheduleOnRN(toggleSyncScrollFrame, false)
@@ -256,8 +270,8 @@ export const Container = React.memo(
             if (
               typeof scrollY.value[tabNames.value[index.value]] === 'number'
             ) {
-                scrollYCurrent.value =
-                  scrollY.value[tabNames.value[index.value]] || 0
+              scrollYCurrent.value =
+                scrollY.value[tabNames.value[index.value]] || 0
             }
             scheduleOnRN(toggleSyncScrollFrame, true)
           }
@@ -355,46 +369,58 @@ export const Container = React.memo(
         [onTabPress]
       )
 
-      const pan = Gesture.Pan().activeOffsetY([ -10, 10 ])
-      pan.onStart(() => {
-        'worklet'
-        cancelAnimation(scrollYCurrent)
-      })
-      pan.onUpdate((e) => {
-        'worklet'
-        if (!isSlidingTopContainerValue.value) {
-          panScrollYValue.value = scrollYCurrent.value
-          isSlidingTopContainerValue.value = true
-          return
-        }
-        scrollYCurrent.value = interpolate(
-          -e.translationY + panScrollYValue.value,
-          [ 0, headerScrollDistance.value ],
-          [ 0, headerScrollDistance.value ],
-          Extrapolation.CLAMP,
-        )
-      })
-      pan.onEnd((e) => {
-        'worklet'
-        if (!isSlidingTopContainerValue.value) {
-          return
-        }
-        panScrollYValue.value = 0
-        scrollYCurrent.value = withDecay({
-          velocity: -e.velocityY,
-          clamp: [ 0, headerScrollDistance.value ],
-          deceleration: IS_IOS ? 0.998 : 0.99,
-        }, (finished) => {
-          isSlidingTopContainerValue.value = false
-          isTopContainerOutOfSyncValue.value = !!finished
-        })
-      })
+      // useMemo：Gesture.Pan() 每次 render 重建会让 GestureDetector 反复
+      // detach/attach 原生手势。闭包只捕获 shared values(引用稳定)与模块常量
+      // IS_IOS，故 deps 可为空。
+      const pan = React.useMemo(
+        () =>
+          Gesture.Pan()
+            .activeOffsetY([ -10, 10 ])
+            .onStart(() => {
+              'worklet'
+              cancelAnimation(scrollYCurrent)
+            })
+            .onUpdate((e) => {
+              'worklet'
+              if (!isSlidingTopContainerValue.value) {
+                panScrollYValue.value = scrollYCurrent.value
+                isSlidingTopContainerValue.value = true
+                return
+              }
+              scrollYCurrent.value = interpolate(
+                -e.translationY + panScrollYValue.value,
+                [ 0, headerScrollDistance.value ],
+                [ 0, headerScrollDistance.value ],
+                Extrapolation.CLAMP,
+              )
+            })
+            .onEnd((e) => {
+              'worklet'
+              if (!isSlidingTopContainerValue.value) {
+                return
+              }
+              panScrollYValue.value = 0
+              scrollYCurrent.value = withDecay({
+                velocity: -e.velocityY,
+                clamp: [ 0, headerScrollDistance.value ],
+                deceleration: IS_IOS ? 0.998 : 0.99,
+              }, (finished) => {
+                isSlidingTopContainerValue.value = false
+                isTopContainerOutOfSyncValue.value = !!finished
+              })
+            }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
+      )
 
+      // 依赖数组列出 resyncTabScroll 闭包实际用到的 render 层值
+      // (refMap/tabNamesArray/contentInset，写法对照上文 afterRender 的 reaction)，
+      // 否则 refMap 更新后 worklet 仍持旧引用。
       useAnimatedReaction(() => scrollYCurrent.value - contentInset, (next, prev) => {
         if (next !== prev && isSlidingTopContainerValue.value) {
           resyncTabScroll()
         }
-      })
+      }, [tabNamesArray, refMap, contentInset])
 
       useAnimatedReaction(() => {
         return isSlidingTopContainerValue.value !== isSlidingTopContainerPrevValue.value
@@ -406,7 +432,7 @@ export const Container = React.memo(
         }
         resyncTabScroll()
         isTopContainerOutOfSyncValue.value = false
-      })
+      }, [tabNamesArray, refMap, contentInset])
 
       return (
         <Context.Provider

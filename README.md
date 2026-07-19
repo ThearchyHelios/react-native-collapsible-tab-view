@@ -18,7 +18,6 @@
     - [Tabs.Lazy](#tabslazy)
     - [Tabs.FlatList](#tabsflatlist)
     - [Tabs.FlashList](#tabsflatlist)
-    - [Tabs.MasonryFlashList](#tabsmasonryflatlist)
     - [Tabs.SectionList](#tabssectionlist)
     - [Tabs.ScrollView](#tabsscrollview)
     - [Ref](#ref)
@@ -243,9 +242,7 @@ Use like a regular FlatList.
 
 Use like a regular FlashList.
 
-### Tabs.MasonryFlashList
-
-Use like a regular MasonryFlashList.
+> `Tabs.MasonryFlashList` was removed: FlashList v2 folded masonry layout into the `masonry` prop, so use `<Tabs.FlashList masonry ... />` instead.
 
 ### Tabs.ScrollView
 
